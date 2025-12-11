@@ -4,5 +4,4 @@ Humphrey, David A. Knowles, Chris Cotsapas, Laura M. Huckins# , Towfique Raj# , 
 J. Brennand#
 
 Pre-print:
-
-[fig1_mpra.pdf](https://github.com/user-attachments/files/24109687/fig1_mpra.pdf)
+<img width="612" height="791" alt="fig1_mpra" src="https://github.com/user-attachments/assets/810e7142-1e66-44f4-9cee-fe77fe341343" />
