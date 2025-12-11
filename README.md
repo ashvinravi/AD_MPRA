@@ -1,7 +1,7 @@
 # AD Fine-mapping and MPRA 
 Chia-Yi Lee*, Ashvin Ravi*, Tzu-Chieh Huang, Briana Wyman, Ziyu Liu, Ariana Chriss, Jack
-Humphrey, David A. Knowles, Chris Cotsapas, Laura M. Huckins# , Towfique Raj# , Kristen
-J. Brennand#
+Humphrey, David A. Knowles, Chris Cotsapas, Laura M. Huckins, Towfique Raj, Kristen
+J. Brennand
 
 Pre-print:
 
