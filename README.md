@@ -5,4 +5,5 @@ J. Brennand#
 
 Pre-print:
 
-<img width="612" height="791" alt="fig1_mpra" src="https://github.com/user-attachments/assets/810e7142-1e66-44f4-9cee-fe77fe341343" />
+<img width="2125" height="2746" alt="fig1_mpra (1)" src="https://github.com/user-attachments/assets/8b018537-3a2d-4f31-b850-5530be1e5f5c" />
+
