@@ -1,0 +1,831 @@
+---
+title: "AD GWAS Fine-mapping"
+subtitle: "Overlap Tables"
+author: |
+ | Ashvin Ravi
+ | Raj Lab
+ | Department of Neuroscience
+ | Icahn School of Medicine at Mount Sinai
+ | NYC, New York
+output: 
+ rmarkdown::html_document:
+   theme: cerulean
+   highlight: haddock
+   code_folding: hide
+   toc: true
+   toc_float: true
+   smooth_scroll: true
+   number_sections: false
+   self_contained: true
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overlapping SNPs 
+
+In this section, we use epigenomic annotations (ChIP-seq) from CNS cell-types (Nott et al. 2019) to pinpoint which fine-mapped SNPs overlap. We also use microglia ATAC-seq annotations (Kosoy et al. 2022) to pinpoint overlapping SNPs. 
+
+**NOTE**: the fine-mapped SNPs used in this analysis are from the SuSiE method + LD matrices calculated from the EADB GWAS (Bellenguez et al. 2022) data. 
+
+```{r createDT, echo=FALSE, message=FALSE, warning=FALSE}
+library(DT)
+createDT <- function(DF, caption="", scrollY=500){
+  data <- DT::datatable(DF, caption=caption,
+    extensions =  'Buttons',
+    options = list( dom = 'Bfrtip', 
+                    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'), 
+                    scrollY = scrollY, scrollX=T, scrollCollapse = T, paging = F,  
+                      columnDefs = list(list(className = 'dt-center', targets = "_all"))
+    )
+  ) 
+   return(data)
+}
+```
+
+```{r finemapping_results, echo=F, message=F, warning=F}
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(valr)
+
+setwd('/Users/ashvinravi/Desktop/finemapping_MPRA_project/AD_MPRA/')
+
+finemap_results = read_tsv('full_results/finemap_results_full.tsv.gz')
+polyfun_susie_results = read_tsv('full_results/polyfun_susie_results_full.tsv.gz')
+polyfun_finemap_results = read_tsv('full_results/polyfun_finemap_results_full.tsv.gz')
+susie_results = read_tsv('full_results/susie_results_full.tsv.gz')
+susie_ld_gwas_rsids = read_tsv('full_results/susie_ld_gwas_with_rsids_hg19.tsv.gz')
+finemap_ld_gwas_rsids = read_tsv('full_results/finemap_ld_gwas_with_rsids_hg19.tsv.gz')
+```
+
+We will filter for only fine-mapped variants with PIP >= 0.1 for this analysis to prioritize variants that overlap with epigenomic annotations.  
+
+```{r, echo=F, fig.width=60, fig.height=45, warning=F, message=F}
+library(stringr)
+library(readxl)
+
+setwd('/Users/ashvinravi/Desktop/finemapping_MPRA_project/AD_MPRA/')
+
+susie_ld_gwas_0.1 <- susie_ld_gwas_rsids %>% dplyr::filter(PIP >= 0.1) %>% dplyr::filter(CREDIBLE_SET > 0)
+
+summary_results <- susie_ld_gwas_0.1 %>% group_by(LOCUS, CREDIBLE_SET) %>% filter(CREDIBLE_SET > 0) %>% count(CREDIBLE_SET)
+
+summary_results$LOCUS[summary_results$LOCUS == 'UNC5CL'] = 'TREM2'
+summary_results$LOCUS[summary_results$LOCUS == 'TREML2'] = 'TREM2'
+
+summary_results$LOCUS <- sapply(str_split(summary_results$LOCUS, '-'), '[', 1)
+summary_results <- unique(summary_results)
+
+locus_levels <- names(sort(tapply(summary_results$n, summary_results$LOCUS, sum)))
+
+CS <- factor(summary_results$CREDIBLE_SET, levels=c('4', '3', '2', '1'))
+
+vep_consequences <- read.table('annotations/VEP_results.txt', sep = '\t')
+
+vep_consequences = vep_consequences[vep_consequences$V4 == 'missense_variant',]
+missense_variants <- data.frame(susie_ld_gwas_0.1$RSID, susie_ld_gwas_0.1$LOCUS)
+missense_variants$missense = 0
+missense_variants$missense[missense_variants$susie_ld_gwas_0.1.RSID %in% vep_consequences$V1] = 1
+missense_variants = unique(missense_variants)
+
+missense_variants$susie_ld_gwas_0.1.LOCUS[missense_variants$susie_ld_gwas_0.1.LOCUS == 'UNC5CL-TREM2'] = 'TREM2'
+missense_variants$susie_ld_gwas_0.1.LOCUS[missense_variants$susie_ld_gwas_0.1.LOCUS == 'TREML2-TREM2'] = 'TREM2'
+
+missense_variants$susie_ld_gwas_0.1.LOCUS <- sapply(str_split(missense_variants$susie_ld_gwas_0.1.LOCUS, '-'), '[', 1)
+missense_variants <- unique(missense_variants)
+
+missense_variants <- missense_variants %>% group_by(susie_ld_gwas_0.1.LOCUS) %>% summarize(sum(missense))
+# write_tsv(missense_variants, '/sc/arion/projects/ad-omics/ashvin/missense_variants.tsv')
+
+names(susie_ld_gwas_0.1)[names(susie_ld_gwas_0.1) == 'BP'] = 'start'
+names(susie_ld_gwas_0.1)[names(susie_ld_gwas_0.1) == 'CHR'] = 'chrom'
+susie_ld_gwas_0.1$end <- susie_ld_gwas_0.1$start + 1
+susie_ld_gwas_0.1$chrom <- paste0('chr', susie_ld_gwas_0.1$chrom)
+susie_ld_gwas_0.1_CS <- susie_ld_gwas_0.1
+
+
+# Assess for overlaps in epigenomic peaks 
+
+microglia_peaks <- read.table('annotations/seq_peaks_annotation_for_microglia.hg19.tsv', sep = '\t')
+
+summarize_epigenomic_peaks <- function(cell_type_data, cell_type) {
+  
+  colnames(cell_type_data) = c('chrom', 'start', 'end', 'Peak')
+  epigenomic_peak_intersect <- bed_intersect(cell_type_data, susie_ld_gwas_0.1_CS)
+
+  epigenomic_peaks_summary <- data.frame(epigenomic_peak_intersect$RSID.y, epigenomic_peak_intersect$LOCUS.y)
+  colnames(epigenomic_peaks_summary) = c('RSID', 'LOCUS')
+  #print("decoy")
+  epigenomic_peaks_summary$LOCUS[epigenomic_peaks_summary$LOCUS == 'UNC5CL-TREM2'] = 'TREM2'
+  epigenomic_peaks_summary$LOCUS[epigenomic_peaks_summary$LOCUS == 'TREML2-TREM2'] = 'TREM2'
+
+  epigenomic_peaks_summary$LOCUS <- sapply(str_split(epigenomic_peaks_summary$LOCUS, '-'), '[', 1)
+
+  epigenomic_peaks_summary <- unique(epigenomic_peaks_summary)
+  summary_counts <- data.frame(table(epigenomic_peaks_summary$LOCUS))
+  colnames(summary_counts) = c('LOCUS', paste(cell_type, '_peak', sep=''))
+  return(summary_counts)
+}
+
+summarize_epigenomic_peaks_table <- function(cell_type_data, cell_type) {
+  
+  colnames(cell_type_data) = c('chrom', 'start', 'end', 'Peak')
+  epigenomic_peak_intersect <- bed_intersect(cell_type_data, susie_ld_gwas_0.1_CS)
+
+  epigenomic_peaks_summary <- data.frame(epigenomic_peak_intersect$RSID.y, epigenomic_peak_intersect$LOCUS.y)
+  colnames(epigenomic_peaks_summary) = c('RSID', 'LOCUS')
+  #print("decoy")
+  epigenomic_peaks_summary$LOCUS[epigenomic_peaks_summary$LOCUS == 'UNC5CL-TREM2'] = 'TREM2'
+  epigenomic_peaks_summary$LOCUS[epigenomic_peaks_summary$LOCUS == 'TREML2-TREM2'] = 'TREM2'
+
+  epigenomic_peaks_summary$LOCUS <- sapply(str_split(epigenomic_peaks_summary$LOCUS, '-'), '[', 1)
+
+  epigenomic_peaks_summary <- unique(epigenomic_peaks_summary)
+  epigenomic_peaks_summary$cell_type <- cell_type
+  #summary_counts <- data.frame(table(epigenomic_peaks_summary$LOCUS))
+  #colnames(summary_counts) = c('LOCUS', paste(cell_type, '_peak', sep=''))
+  return(epigenomic_peaks_summary)
+}
+
+mpra_data <- read_excel('annotations/science.abi8654_data_s1.xlsx', sheet = "Combined MPRA Summary Stats")
+
+mpra_data_ad <- mpra_data %>% dplyr::filter(Disorder == 'AD')
+mpra_data_ad <- mpra_data_ad %>% dplyr::filter(p.value <= 0.05)
+names(mpra_data_ad)[names(mpra_data_ad) == 'pos'] = 'start'
+names(mpra_data_ad)[names(mpra_data_ad) == 'chr'] = 'chrom'
+mpra_data_ad$category <- 'HEK293T_MPRA'
+
+mpra_data_ad$end <- mpra_data_ad$start + 1 
+mpra_data_ad <- mpra_data_ad[,c(5,6,15,14)]
+
+mpra_intersect <- summarize_epigenomic_peaks(mpra_data_ad, 'HEK293T_MPRA')
+
+microglia_atac_peaks <- read.table('annotations/seq_peaks_annotation_for_microglia.hg19.tsv', sep = '\t')
+microglia_enhancer <- read.table('annotations/Microglia_enhancers.bed', sep = '\t')
+microglia_promoter <- read.table('annotations/Microglia_promoters.bed', sep = '\t')
+neuronal_promoter <- read.table('annotations/Neuronal_promoters.bed', sep='\t')
+neuronal_enhancer <- read.table('annotations/Neuronal_enhancers.bed', sep='\t')
+neuronal_enhancer <- read.table('annotations/Neuronal_enhancers.bed', sep='\t')
+astrocyte_promoter <- read.table('annotations/Astrocyte_promoters.bed', sep='\t')
+astrocyte_enhancer <- read.table('annotations/Astrocyte_enhancers.bed', sep='\t')
+oligodendrocyte_promoter <- read.table('annotations/Oligo_promoters.bed', sep='\t')
+oligodendrocyte_enhancer <- read.table('annotations/Oligo_enhancers.bed', sep='\t')
+
+microglia_atac_table <- summarize_epigenomic_peaks_table(microglia_atac_peaks, 'microglia_atac')
+microglia_promoter_table <- summarize_epigenomic_peaks_table(microglia_promoter, 'microglia_promoter')
+microglia_enhancer_table <- summarize_epigenomic_peaks_table(microglia_enhancer, 'microglia_enhancer')
+neuronal_promoter_table <- summarize_epigenomic_peaks_table(neuronal_promoter, 'neuronal_promoter')
+neuronal_enhancer_table <- summarize_epigenomic_peaks_table(neuronal_enhancer, 'neuronal_enhancer')
+astrocyte_promoter_table <- summarize_epigenomic_peaks_table(astrocyte_promoter, 'astrocyte_promoter')
+astrocyte_enhancer_table <- summarize_epigenomic_peaks_table(astrocyte_enhancer, 'astrocyte_enhancer')
+oligodendrocyte_promoter_table <- summarize_epigenomic_peaks_table(oligodendrocyte_promoter, 'oligodendrocyte_promoter')
+oligodendrocyte_enhancer_table <- summarize_epigenomic_peaks_table(oligodendrocyte_enhancer, 'oligodendrocyte_enhancer')
+
+epigenomic_table_overlap <- rbind(microglia_atac_table, microglia_promoter_table, microglia_enhancer_table, neuronal_promoter_table, neuronal_enhancer_table, astrocyte_promoter_table, astrocyte_enhancer_table, oligodendrocyte_promoter_table, oligodendrocyte_enhancer_table)
+
+microglia_atac_intersect <- summarize_epigenomic_peaks(microglia_atac_peaks, 'microglia_atac')
+microglia_promoter_intersect <- summarize_epigenomic_peaks(microglia_promoter, 'microglia_promoter')
+microglia_enhancer_intersect <- summarize_epigenomic_peaks(microglia_enhancer, 'microglia_enhancer')
+neuronal_promoter_intersect <- summarize_epigenomic_peaks(neuronal_promoter, 'neuronal_promoter')
+neuronal_enhancer_intersect <- summarize_epigenomic_peaks(neuronal_enhancer, 'neuronal_enhancer')
+astrocyte_promoter_intersect <- summarize_epigenomic_peaks(astrocyte_promoter, 'astrocyte_promoter')
+astrocyte_enhancer_intersect <- summarize_epigenomic_peaks(astrocyte_enhancer, 'astrocyte_enhancer')
+oligodendrocyte_promoter_intersect <- summarize_epigenomic_peaks(oligodendrocyte_promoter, 'oligodendrocyte_promoter')
+oligodendrocyte_enhancer_intersect <- summarize_epigenomic_peaks(oligodendrocyte_enhancer, 'oligodendrocyte_enhancer')
+colnames(missense_variants) = c('LOCUS', 'missense')
+
+consequence_merge_summary <- full_join(microglia_enhancer_intersect, microglia_promoter_intersect, by = 'LOCUS') %>% full_join(., microglia_atac_intersect, by = 'LOCUS') %>%
+  full_join(., neuronal_promoter_intersect, by = 'LOCUS') %>% full_join(., neuronal_enhancer_intersect, by = 'LOCUS') %>% 
+  full_join(., astrocyte_promoter_intersect, by = 'LOCUS') %>% full_join(., astrocyte_enhancer_intersect, by = 'LOCUS') %>% 
+  full_join(., oligodendrocyte_promoter_intersect, by = 'LOCUS') %>% full_join(., oligodendrocyte_enhancer_intersect, by = 'LOCUS') %>% full_join(., missense_variants, by = 'LOCUS')
+
+consequence_merge_summary[is.na(consequence_merge_summary)] <- 0 
+
+# write_tsv(consequence_merge_summary, '/sc/arion/projects/ad-omics/ashvin/epigenomic_overlaps.tsv')
+consequence_merge_summary$missense[is.na(consequence_merge_summary$missense)] = 0
+
+locus_levels <- names(sort(tapply(summary_results$n, summary_results$LOCUS, sum)))
+
+```
+
+Here, we show the number of fine-mapped SNPs prioritized by SuSiE + GWAS LD with PIP > 0.1 that fall within a credible set. \ 
+
+**Figure 2c**: In the first plot, we show the number of credible sets per locus. Some loci have multiple credible sets, such as *PLCG2* and *TREM2*, where we show that fine-mapping prioritizes known signals/missense variants that have previously been identified, as well as noncoding variants that fall within a different credible set/signal. 
+
+**Figure 2d**: We determine the number of fine-mapped SNPs that fall in different epigenomic annotations. These include enhancer and promoter marks from microglia, astrocytes, oligodendrocytes, and neurons from the Nott et al. 2019 paper. 
+
+```{r epigenomic_peak_overlaps, echo=F, message=F, warning=F, fig.width=60, fig.height=40}
+library(reshape)
+library(readr)
+library(ggplot2)
+
+locus_filtered <- c('PLCG2', 'TREM2', 'PICALM', 'BIN1',
+                    'ECHDC3', 'EPHA1', 'ABI3', 'RASGEF1C',
+                    'APH1B', 'SLC24A4', 'INPP5D', 'SPI1')
+
+summary_results <- summary_results[summary_results$LOCUS %in% consequence_merge_summary$LOCUS,]
+#summary_results <- summary_results[summary_results$LOCUS %in% locus_filtered,]
+locus_levels <- names(sort(tapply(summary_results$n, summary_results$LOCUS, sum)))
+
+missense_variants <- missense_variants[missense_variants$LOCUS %in% summary_results$LOCUS,]
+missense_variants <- missense_variants[missense_variants$LOCUS %in% consequence_merge_summary$LOCUS,]
+
+melted_missense_variants <- melt(missense_variants)
+melted_missense_variants$value <- as.character(melted_missense_variants$value)
+# melted_missense_variants$value[melted_missense_variants$value >=4] = '4+'
+melted_missense_variants$value <- factor(melted_missense_variants$value, levels = c('0','1','2','3','4', '5'))
+
+summary <- ggplot(summary_results, aes(x=factor(LOCUS, locus_levels), y=n, fill=factor(CREDIBLE_SET, levels = c('4','3','2', '1')))) +
+  geom_bar(position='stack', stat='identity') +
+  coord_flip() +
+  theme_bw() +
+  theme(legend.margin=margin(10,10,10,10),
+        axis.text.y = element_text(color='black',size=30),
+        axis.text.x = element_text(color='black',size=30),
+        axis.title.x = element_text(color='black',size=40),
+        axis.title.y = element_text(color='black',size=35))+
+  scale_fill_manual(values=c("#9ECAE1",
+                             "#6BAED6",
+                             "#3182BD",
+                             "#08519C"),
+                    drop=FALSE,
+                    name='# Credible Sets per Locus',
+                    labels=c("4",
+                             "3",
+                             "2",
+                             "1")) +
+  ylab('# of SNPs in a Credible Set w/PIP > 0.1') +
+  xlab('LOCUS') + theme(legend.position = "none", strip.text.x = element_text(size = 30)) + facet_grid(cols= vars("# of SNPs"))
+
+
+e = ggplot(melted_missense_variants, aes(x = 'Missense', y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + scale_fill_manual(values=c("#FCFBFD", "#DADAEB", "#BCBDDC", "#9E9AC8", "#807DBA"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4+')) +
+  scale_x_discrete(labels=c('Missense')) + theme_bw() + theme(legend.position = "none", axis.text.y=element_blank(),text = element_text(size=15),
+                                                              ) +
+  xlab(label=element_blank()) + ylab(label=element_blank())
+
+consequence_merge_summary = consequence_merge_summary[consequence_merge_summary$LOCUS %in% summary_results$LOCUS,]
+# consequence_merge_summary = consequence_merge_summary[consequence_merge_summary$LOCUS %in% locus_filtered,]
+
+microglia_data <- data.frame(consequence_merge_summary[, c(1,3,2,4)])
+melted_microglia_data <- melt(microglia_data, id='LOCUS')
+melted_microglia_data$value <- as.character(melted_microglia_data$value)
+# melted_microglia_data$value[melted_microglia_data$value >=4] = '4+'
+melted_microglia_data$value <- factor(melted_microglia_data$value, levels = c('0','1','2','3','4','5'))
+
+# locus_levels <- names(sort(tapply(melted_microglia_data$LOCUS, melted_microglia_data$LOCUS, sum)))
+a = ggplot(melted_microglia_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + geom_text(size=12, aes(label=ifelse((as.numeric(value) - 1) == 0, "", as.numeric(value) - 1))) + scale_fill_manual(values=c("#F7FCF5", "#C7E9C0", "#A1D99B", "#74C476", "#41AB5D", "#419d5d"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('Promoter', 'Enhancer', 'ATAC-seq')) + theme_bw() + theme(legend.position = "none",
+                                                                                      axis.text.y=element_blank(),
+                                                                                      axis.text.x = element_text(angle = 45,
+                                                                                                                 size=26,
+                                                                                                                 hjust = 1,
+                                                                                                                 colour='black'),
+                                                                                      strip.text.x = element_text(size = 30)
+                                                                                      ) +
+  xlab(label=element_blank()) +  ylab(label=element_blank()) + facet_grid(cols=vars("Microglia"))
+
+neuronal_data <- data.frame(consequence_merge_summary[, c(1,5,6)])
+melted_neuronal_data <- melt(neuronal_data)
+melted_neuronal_data$value <- as.character(melted_neuronal_data$value)
+melted_neuronal_data$value <- factor(melted_neuronal_data$value, levels = c('0','1','2','3','4','5'))
+b = ggplot(melted_neuronal_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + geom_text(size=12, aes(label=ifelse((as.numeric(value) - 1) == 0, "", as.numeric(value) - 1))) + scale_fill_manual(values=c("#F7FBFF","#C6DBEF","#9ECAE1","#6BAED6","#4292C6","#2171B5","#084594"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4', '5')) +
+  scale_x_discrete(labels=c('Promoter', 'Enhancer')) + theme_bw() + theme(legend.position = "none") +theme(axis.text.y=element_blank(),
+                                                                                                           axis.text.x = element_text(angle = 45,
+                                                                                                                                      size=26,
+                                                                                                                                      hjust = 1,
+                                                                                                                                      colour='black'),
+                                                                                                           strip.text.x = element_text(size = 30)) +
+  xlab(label=element_blank()) +
+  ylab(label=element_blank()) + 
+  facet_grid(cols=vars("Neuron"))
+
+astrocyte_data <- data.frame(consequence_merge_summary[, c(1,7,8)])
+melted_astrocyte_data <- melt(astrocyte_data)
+melted_astrocyte_data$value <- as.character(melted_astrocyte_data$value)
+melted_astrocyte_data$value <- factor(melted_astrocyte_data$value, levels = c('0','1','2','3','4', '5'))
+c = ggplot(melted_astrocyte_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + geom_text(size=12, aes(label=ifelse((as.numeric(value) - 1) == 0, "", as.numeric(value) - 1))) + scale_fill_manual(values=c("#FFF5F0","#FCBBA1", "#FC9272", "#FB6A4A", "#EF3B2C", "#CB181D", "#A50F15"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4', '5')) +
+  scale_x_discrete(labels=c('Promoter', 'Enhancer')) + theme_bw() + theme(legend.position = "none") +
+  theme(axis.text.y=element_blank(), axis.text.x = element_text(angle = 45,size=26,hjust = 1, colour='black'), strip.text.x = element_text(size = 30)) +
+  xlab(label=element_blank()) +
+  ylab(label=element_blank()) + 
+  facet_grid(cols=vars("Astrocyte"))
+
+oligo_data <- data.frame(consequence_merge_summary[, c(1,9,10)])
+melted_oligo_data <- melt(oligo_data)
+melted_oligo_data$value <- as.character(melted_oligo_data$value)
+melted_oligo_data$value <- factor(melted_oligo_data$value, levels = c('0','1','2','3','4','5'))
+d = ggplot(melted_oligo_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + geom_text(size=12, aes(label=ifelse((as.numeric(value) - 1) == 0, "", as.numeric(value) - 1))) + scale_fill_manual(values=c("#FFF5EB","#FDD0A2","#FDAE6B","#FD8D3C","#F16913","#f00e13"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('Promoter', 'Enhancer')) + theme_bw() + theme(legend.position = "none",
+                                                                          axis.text.y=element_blank(),
+                                                                          axis.text.x = element_text(angle = 45,
+                                                                                                     size=26,
+                                                                                                     hjust = 1,
+                                                                                                     colour='black'),
+                                                                          strip.text.x = element_text(size = 30)
+                                                                          ) +
+  xlab(label=element_blank()) +
+  ylab(label=element_blank()) +
+  facet_grid(cols=vars("Oligo"))
+
+
+
+mpra_data <- data.frame(consequence_merge_summary$LOCUS)
+mpra_data$mpra_hit <- 0
+colnames(mpra_data) = c('LOCUS', 'mpra_hit')
+mpra_data$mpra_hit[mpra_data$LOCUS == 'PICALM'] = 2
+mpra_data$mpra_hit[mpra_data$LOCUS == 'CLU'] = 1
+mpra_data$mpra_hit <- as.character(mpra_data$mpra_hit)
+melted_mpra_data <- melt(mpra_data, id='LOCUS')
+
+
+e = ggplot(melted_mpra_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + scale_fill_manual(values=c("#FCFBFD", "#DADAEB", "#BCBDDC", "#9E9AC8", "#807DBA"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('HEK293T MPRA')) + theme_bw() + theme(legend.position = "none",
+                                                                          axis.text.y=element_blank(), axis.text.x = element_text(size=26)
+  ) +
+  xlab(label=element_blank()) +
+  ylab(label=element_blank())
+
+epigenomic_peak_plot <- cowplot::plot_grid(summary,a,b,c,d, align='h', ncol=5, rel_widths = c(9,3.5,2,2,2))
+print(epigenomic_peak_plot)
+
+```
+
+## Overlaps: Table Format
+We provide a table of variants that fall in a credible set with PIP > 0.1 that fall in an CNS cell-type epigenomic annotation. (Supplementary Table 3). 
+
+```{r epigenomic_table, message=F, warning=F}
+createDT(epigenomic_table_overlap)
+```
+
+## Overlaps: Subset Loci
+**Figure 2c-d**: Here, we subset 12 loci for AD that show overlaps in epigenomic peaks:  *PLCG2, TREM2, PICALM, BIN1, ECHDC3, EPHA1, ABI3, RASGEF1C, APH1B, SLC24A4, INPP5D, SPI1*. 
+
+```{r overlap_table_select_loci, echo=F, message=F, warning=F, fig.width=60, fig.height=20}
+library(reshape)
+library(readr)
+library(ggplot2)
+
+locus_filtered <- c('PLCG2', 'TREM2', 'PICALM', 'BIN1',
+                    'ECHDC3', 'EPHA1', 'ABI3', 'RASGEF1C',
+                    'APH1B', 'SLC24A4', 'INPP5D', 'SPI1')
+
+summary_results <- summary_results[summary_results$LOCUS %in% consequence_merge_summary$LOCUS,]
+summary_results <- summary_results[summary_results$LOCUS %in% locus_filtered,]
+locus_levels <- names(sort(tapply(summary_results$n, summary_results$LOCUS, sum)))
+
+missense_variants <- missense_variants[missense_variants$LOCUS %in% summary_results$LOCUS,]
+missense_variants <- missense_variants[missense_variants$LOCUS %in% consequence_merge_summary$LOCUS,]
+
+melted_missense_variants <- melt(missense_variants)
+melted_missense_variants$value <- as.character(melted_missense_variants$value)
+# melted_missense_variants$value[melted_missense_variants$value >=4] = '4+'
+melted_missense_variants$value <- factor(melted_missense_variants$value, levels = c('0','1','2','3','4','5'))
+
+summary <- ggplot(summary_results, aes(x=factor(LOCUS, locus_levels), y=n, fill=factor(CREDIBLE_SET, levels = c('4','3','2', '1')))) +
+  geom_bar(position='stack', stat='identity') +
+  coord_flip() +
+  theme_bw() +
+  theme(legend.margin=margin(10,10,10,10),
+        axis.text.y = element_text(color='black',size=30),
+        axis.text.x = element_text(color='black',size=30),
+        axis.title.x = element_text(color='black',size=40),
+        axis.title.y = element_text(color='black',size=35))+
+  scale_fill_manual(values=c("#9ECAE1",
+                             "#6BAED6",
+                             "#3182BD",
+                             "#08519C"),
+                    drop=FALSE,
+                    name='# Credible Sets per Locus',
+                    labels=c("4",
+                             "3",
+                             "2",
+                             "1")) +
+  ylab('# of SNPs in a Credible Set w/PIP > 0.1') +
+  xlab('LOCUS') + theme(legend.position = "none", strip.text.x = element_text(size = 30)) + facet_grid(cols= vars("# of SNPs"))
+
+
+e = ggplot(melted_missense_variants, aes(x = 'Missense', y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + scale_fill_manual(values=c("#FCFBFD", "#DADAEB", "#BCBDDC", "#9E9AC8", "#807DBA"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('Missense')) + theme_bw() + theme(legend.position = "none", axis.text.y=element_blank(),text = element_text(size=15),
+                                                              ) +
+  xlab(label=element_blank()) + ylab(label=element_blank())
+
+consequence_merge_summary = consequence_merge_summary[consequence_merge_summary$LOCUS %in% summary_results$LOCUS,]
+# consequence_merge_summary = consequence_merge_summary[consequence_merge_summary$LOCUS %in% locus_filtered,]
+
+microglia_data <- data.frame(consequence_merge_summary[, c(1,3,2,4)])
+melted_microglia_data <- melt(microglia_data, id='LOCUS')
+melted_microglia_data$value <- as.character(melted_microglia_data$value)
+# melted_microglia_data$value[melted_microglia_data$value >=4] = '4+'
+melted_microglia_data$value <- factor(melted_microglia_data$value, levels = c('0','1','2','3','4','5'))
+
+# locus_levels <- names(sort(tapply(melted_microglia_data$LOCUS, melted_microglia_data$LOCUS, sum)))
+a = ggplot(melted_microglia_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + scale_fill_manual(values=c("#F7FCF5", "#C7E9C0", "#A1D99B", "#74C476", "#41AB5D", "#419d5d"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('Promoter', 'Enhancer', 'ATAC-seq')) + geom_text(size=12, aes(label=ifelse((as.numeric(value) - 1) == 0, "", as.numeric(value) - 1))) + theme_bw() + theme(legend.position = "none",
+                                                                                      axis.text.y=element_blank(),
+                                                                                      axis.text.x = element_text(angle = 45,
+                                                                                                                 size=26,
+                                                                                                                 hjust = 1,
+                                                                                                                 colour='black'),
+                                                                                      strip.text.x = element_text(size = 30)
+                                                                                      ) +
+  xlab(label=element_blank()) +  ylab(label=element_blank()) + facet_grid(cols=vars("Microglia"))
+
+
+neuronal_data <- data.frame(consequence_merge_summary[, c(1,5,6)])
+melted_neuronal_data <- melt(neuronal_data)
+melted_neuronal_data$value <- as.character(melted_neuronal_data$value)
+melted_neuronal_data$value <- factor(melted_neuronal_data$value, levels = c('0','1','2','3','4','5'))
+b = ggplot(melted_neuronal_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + scale_fill_manual(values=c("#F7FBFF","#C6DBEF","#9ECAE1","#6BAED6","#4292C6","#2171B5","#084594"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('Promoter', 'Enhancer')) + geom_text(size=12, aes(label=ifelse((as.numeric(value) - 1) == 0, "", as.numeric(value) - 1))) + 
+  theme_bw() + theme(legend.position = "none") +theme(axis.text.y=element_blank(),
+                                                                                                           axis.text.x = element_text(angle = 45,
+                                                                                                                                      size=26,
+                                                                                                                                      hjust = 1,
+                                                                                                                                      colour='black'),
+                                                                                                           strip.text.x = element_text(size = 30)) +
+  xlab(label=element_blank()) +
+  ylab(label=element_blank()) + 
+  facet_grid(cols=vars("Neuron"))
+
+astrocyte_data <- data.frame(consequence_merge_summary[, c(1,7,8)])
+melted_astrocyte_data <- melt(astrocyte_data)
+melted_astrocyte_data$value <- as.character(melted_astrocyte_data$value)
+melted_astrocyte_data$value <- factor(melted_astrocyte_data$value, levels = c('0','1','2','3','4','5'))
+c = ggplot(melted_astrocyte_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + geom_text(size=12, aes(label=ifelse((as.numeric(value) - 1) == 0, "", as.numeric(value) - 1))) +
+  scale_fill_manual(values=c("#FFF5F0","#FCBBA1", "#FC9272", "#FB6A4A", "#EF3B2C", "#CB181D", "#A50F15"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('Promoter', 'Enhancer')) + theme_bw() + theme(legend.position = "none") +
+  theme(axis.text.y=element_blank(), axis.text.x = element_text(angle = 45,size=26,hjust = 1, colour='black'), strip.text.x = element_text(size = 30)) +
+  xlab(label=element_blank()) +
+  ylab(label=element_blank()) + 
+  facet_grid(cols=vars("Astrocyte"))
+
+oligo_data <- data.frame(consequence_merge_summary[, c(1,9,10)])
+melted_oligo_data <- melt(oligo_data)
+melted_oligo_data$value <- as.character(melted_oligo_data$value)
+melted_oligo_data$value <- factor(melted_oligo_data$value, levels = c('0','1','2','3','4','5'))
+d = ggplot(melted_oligo_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + geom_text(size=12, aes(label=ifelse((as.numeric(value) - 1) == 0, "", as.numeric(value) - 1))) +
+  scale_fill_manual(values=c("#FFF5EB","#FDD0A2","#FDAE6B","#FD8D3C","#F16913","#f00e13"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('Promoter', 'Enhancer')) + theme_bw() + theme(legend.position = "none",
+                                                                          axis.text.y=element_blank(),
+                                                                          axis.text.x = element_text(angle = 45,
+                                                                                                     size=26,
+                                                                                                     hjust = 1,
+                                                                                                     colour='black'),
+                                                                          strip.text.x = element_text(size = 30)
+                                                                          ) +
+  xlab(label=element_blank()) +
+  ylab(label=element_blank()) +
+  facet_grid(cols=vars("Oligo"))
+
+
+
+mpra_data <- data.frame(consequence_merge_summary$LOCUS)
+mpra_data$mpra_hit <- 0
+colnames(mpra_data) = c('LOCUS', 'mpra_hit')
+mpra_data$mpra_hit[mpra_data$LOCUS == 'PICALM'] = 2
+mpra_data$mpra_hit[mpra_data$LOCUS == 'CLU'] = 1
+mpra_data$mpra_hit <- as.character(mpra_data$mpra_hit)
+melted_mpra_data <- melt(mpra_data, id='LOCUS')
+
+
+e = ggplot(melted_mpra_data, aes(x = variable, y = factor(LOCUS, locus_levels), fill = value)) +
+  geom_tile() + scale_fill_manual(values=c("#FCFBFD", "#DADAEB", "#BCBDDC", "#9E9AC8", "#807DBA"),
+                                  name='Overlapping Fine-mapped SNPs',
+                                  drop=FALSE,
+                                  labels=c('0','1','2','3','4','5')) +
+  scale_x_discrete(labels=c('HEK293T MPRA')) + theme_bw() + theme(legend.position = "none",
+                                                                          axis.text.y=element_blank(), axis.text.x = element_text(size=26)
+  ) +
+  xlab(label=element_blank()) +
+  ylab(label=element_blank())
+
+epigenomic_peak_plot <- cowplot::plot_grid(summary,a,b,c,d, align='h', ncol=6, rel_widths = c(9,3.5,2,2,2,2))
+print(epigenomic_peak_plot)
+```
+
+## Annotation Enrichment
+
+```{r annotation_enrichment_per_PP, eval=F, message=F, warning=F}
+
+library(readr)
+library(dplyr)
+library(regioneR)
+library(ggplot2)
+library(GenomicRanges)
+
+set.seed(252)
+thousand_genome_panel_hg38 <- data.frame()
+setwd('/Users/ashvinravi/Desktop/finemapping_MPRA_project/thousand_genome_panel_hg38_by_chr/')
+chr_panel = list.files('/Users/ashvinravi/Desktop/finemapping_MPRA_project/thousand_genome_panel_hg38_by_chr/')
+for (f in chr_panel) {
+  df = read_tsv(f)
+  thousand_genome_panel_hg38 <- rbind(df, thousand_genome_panel_hg38)
+  
+}
+
+# thousand_genome_panel_hg38 = read_tsv("/Users/ashvinravi/Desktop/finemapping_MPRA_project/")
+
+susie_ld_gwas_0.001 <- susie_ld_gwas_rsids %>% filter(PIP >= 0.001) %>% 
+  mutate(end=start + 1, chrom=paste0('chr', CHR)) %>% select(chrom, start, end, RSID)
+susie_ld_gwas_0.01 <- susie_ld_gwas_rsids %>% filter(PIP >= 0.01) %>%
+  mutate(end=start + 1, chrom=paste0('chr', CHR)) %>% select(chrom, start, end, RSID)
+susie_ld_gwas_0.1 <- susie_ld_gwas_rsids %>% filter(PIP >= 0.1) %>% 
+  mutate(end=start + 1, chrom=paste0('chr', CHR)) %>% select(chrom, start, end, RSID)
+susie_ld_gwas_0.5 <- susie_ld_gwas_rsids %>% filter(PIP >= 0.5) %>% 
+  mutate(end=start + 1, chrom=paste0('chr', CHR)) %>% select(chrom, start, end, RSID)
+
+microglia_enhancers_GR = toGRanges(data.frame(chr=microglia_enhancer$V1,
+                                          start=microglia_enhancer$V2, 
+                                          end=microglia_enhancer$V3))
+microglia_promoters_GR = toGRanges(data.frame(chr=microglia_promoter$V1,
+                                          start=microglia_promoter$V2, 
+                                          end=microglia_promoter$V3))
+astrocyte_enhancers_GR = toGRanges(data.frame(chr=astrocyte_enhancer$V1,
+                                          start=astrocyte_enhancer$V2, 
+                                          end=astrocyte_enhancer$V3))
+astrocyte_promoters_GR = toGRanges(data.frame(chr=astrocyte_promoter$V1,
+                                          start=astrocyte_promoter$V2, 
+                                          end=astrocyte_promoter$V3))
+neuronal_enhancers_GR = toGRanges(data.frame(chr=neuronal_enhancer$V1,
+                                          start=neuronal_enhancer$V2, 
+                                          end=neuronal_enhancer$V3))
+neuronal_promoters_GR = toGRanges(data.frame(chr=neuronal_promoter$V1,
+                                          start=neuronal_promoter$V2, 
+                                          end=neuronal_promoter$V3))
+oligo_enhancers_GR = toGRanges(data.frame(chr=oligodendrocyte_enhancer$V1,
+                                          start=oligodendrocyte_enhancer$V2, 
+                                          end=oligodendrocyte_enhancer$V3))
+oligo_promoters_GR = toGRanges(data.frame(chr=oligodendrocyte_promoter$V1,
+                                          start=oligodendrocyte_promoter$V2, 
+                                          end=oligodendrocyte_promoter$V3))
+susie_ld_gwas_0.001_GR = toGRanges(data.frame(chr=susie_ld_gwas_0.001$chrom, 
+                                          start=susie_ld_gwas_0.001$start, 
+                                          end=susie_ld_gwas_0.001$end))
+
+susie_ld_gwas_0.01_GR = toGRanges(data.frame(chr=susie_ld_gwas_0.01$chrom, 
+                                          start=susie_ld_gwas_0.01$start, 
+                                          end=susie_ld_gwas_0.01$end))
+
+susie_ld_gwas_0.1_GR = toGRanges(data.frame(chr=susie_ld_gwas_0.1$chrom, 
+                                          start=susie_ld_gwas_0.1$start, 
+                                          end=susie_ld_gwas_0.1$end))
+
+susie_ld_gwas_0.5_GR = toGRanges(data.frame(chr=susie_ld_gwas_0.5$chrom, 
+                                          start=susie_ld_gwas_0.5$start, 
+                                          end=susie_ld_gwas_0.5$end))
+
+ME_overlap_0.001 = numOverlaps(susie_ld_gwas_0.001_GR, microglia_enhancers_GR)
+ME_overlap_0.01 = numOverlaps(susie_ld_gwas_0.01_GR, microglia_enhancers_GR)
+ME_overlap_0.1 = numOverlaps(susie_ld_gwas_0.1_GR, microglia_enhancers_GR)
+ME_overlap_0.5 = numOverlaps(susie_ld_gwas_0.5_GR, microglia_enhancers_GR)
+
+calculate_random_overlap <- function(input_dataset) {
+    ME_randomized_overlap = c()
+    MP_randomized_overlap =  c()
+    AE_randomized_overlap = c()
+    AP_randomized_overlap =  c()
+    NE_randomized_overlap = c()
+    NP_randomized_overlap =  c()
+    OE_randomized_overlap = c()
+    OP_randomized_overlap = c()
+  print("Generating random regions...")
+  for (x in 1:5000) {
+     # Sample Random gwas_snps from panel from 1000G panel. 
+    randomized_snps <- thousand_genome_panel_hg38 %>%
+      slice_sample(n = length(input_dataset), replace=T) %>%
+      ungroup()
+    if (x %% 100 == 0) {
+      print(x)
+    }
+    randomized_snps_GR = toGRanges(data.frame(chr=randomized_snps$chrom,
+                                              start=randomized_snps$start,
+                                              end=as.numeric(randomized_snps$end)))
+    
+    ME_randomized_overlap = c(ME_randomized_overlap, numOverlaps(randomized_snps_GR, microglia_enhancers_GR))
+    MP_randomized_overlap =  c(MP_randomized_overlap, numOverlaps(randomized_snps_GR, microglia_promoters_GR))
+    AE_randomized_overlap = c(AE_randomized_overlap, numOverlaps(randomized_snps_GR, astrocyte_enhancers_GR))
+    AP_randomized_overlap =  c(AP_randomized_overlap, numOverlaps(randomized_snps_GR, astrocyte_promoters_GR))
+    NE_randomized_overlap = c(NE_randomized_overlap, numOverlaps(randomized_snps_GR, neuronal_enhancers_GR))
+    NP_randomized_overlap =  c(NP_randomized_overlap, numOverlaps(randomized_snps_GR, neuronal_promoters_GR))
+    OE_randomized_overlap = c(OE_randomized_overlap, numOverlaps(randomized_snps_GR, oligo_enhancers_GR))
+    OP_randomized_overlap =  c(OP_randomized_overlap, numOverlaps(randomized_snps_GR, oligo_promoters_GR))
+  }
+  overlap_table = cbind(ME_randomized_overlap, MP_randomized_overlap, 
+                        AE_randomized_overlap, AP_randomized_overlap, 
+                        NE_randomized_overlap, NP_randomized_overlap, 
+                        OE_randomized_overlap, OP_randomized_overlap)
+  return(overlap_table)
+}
+
+randomized_overlap_0.001 = calculate_random_overlap(susie_ld_gwas_0.001_GR)
+randomized_overlap_0.01 = calculate_random_overlap(susie_ld_gwas_0.01_GR)
+randomized_overlap_0.1 = calculate_random_overlap(susie_ld_gwas_0.1_GR)
+randomized_overlap_0.5 = calculate_random_overlap(susie_ld_gwas_0.5_GR)
+
+ME_enrichment = c(numOverlaps(susie_ld_gwas_0.001_GR, microglia_enhancers_GR) / mean(randomized_overlap_0.001[,1]),
+                  numOverlaps(susie_ld_gwas_0.01_GR, microglia_enhancers_GR) / mean(randomized_overlap_0.01[,1]),
+                  numOverlaps(susie_ld_gwas_0.1_GR, microglia_enhancers_GR) / mean(randomized_overlap_0.1[,1]),
+                  numOverlaps(susie_ld_gwas_0.5_GR, microglia_enhancers_GR) / mean(randomized_overlap_0.5[,1]) )
+
+MP_enrichment = c(numOverlaps(susie_ld_gwas_0.001_GR, microglia_promoters_GR) / mean(randomized_overlap_0.001[,2]),
+                        numOverlaps(susie_ld_gwas_0.01_GR, microglia_promoters_GR) / mean(randomized_overlap_0.01[,2]),
+                        numOverlaps(susie_ld_gwas_0.1_GR, microglia_promoters_GR) / mean(randomized_overlap_0.1[,2]),
+                        numOverlaps(susie_ld_gwas_0.5_GR, microglia_promoters_GR) / mean(randomized_overlap_0.5[,2]) )
+
+AE_enrichment = c(numOverlaps(susie_ld_gwas_0.001_GR, astrocyte_enhancers_GR) / mean(randomized_overlap_0.001[,3]),
+                        numOverlaps(susie_ld_gwas_0.01_GR, astrocyte_enhancers_GR) / mean(randomized_overlap_0.01[,3]),
+                        numOverlaps(susie_ld_gwas_0.1_GR, astrocyte_enhancers_GR) / mean(randomized_overlap_0.1[,3]),
+                        numOverlaps(susie_ld_gwas_0.5_GR, astrocyte_enhancers_GR) / mean(randomized_overlap_0.5[,3]) )
+
+AP_enrichment = c(numOverlaps(susie_ld_gwas_0.001_GR, astrocyte_promoters_GR) / mean(randomized_overlap_0.001[,4]),
+                        numOverlaps(susie_ld_gwas_0.01_GR, astrocyte_promoters_GR) / mean(randomized_overlap_0.01[,4]),
+                        numOverlaps(susie_ld_gwas_0.1_GR, astrocyte_promoters_GR) / mean(randomized_overlap_0.1[,4]),
+                        numOverlaps(susie_ld_gwas_0.5_GR, astrocyte_promoters_GR) / mean(randomized_overlap_0.5[,4]) )
+
+NE_enrichment = c(numOverlaps(susie_ld_gwas_0.001_GR, neuronal_enhancers_GR) / mean(randomized_overlap_0.001[,5]),
+                        numOverlaps(susie_ld_gwas_0.01_GR, neuronal_enhancers_GR) / mean(randomized_overlap_0.01[,5]),
+                        numOverlaps(susie_ld_gwas_0.1_GR, neuronal_enhancers_GR) / mean(randomized_overlap_0.1[,5]),
+                        numOverlaps(susie_ld_gwas_0.5_GR, neuronal_enhancers_GR) / mean(randomized_overlap_0.5[,5]) )
+
+NP_enrichment = c(numOverlaps(susie_ld_gwas_0.001_GR, neuronal_promoters_GR) / mean(randomized_overlap_0.001[,6]),
+                        numOverlaps(susie_ld_gwas_0.01_GR, neuronal_promoters_GR) / mean(randomized_overlap_0.01[,6]),
+                        numOverlaps(susie_ld_gwas_0.1_GR, neuronal_promoters_GR) / mean(randomized_overlap_0.1[,6]),
+                        numOverlaps(susie_ld_gwas_0.5_GR, neuronal_promoters_GR) / mean(randomized_overlap_0.5[,6]) )
+
+OE_enrichment = c(numOverlaps(susie_ld_gwas_0.001_GR, neuronal_promoters_GR) / mean(randomized_overlap_0.001[,7]),
+                        numOverlaps(susie_ld_gwas_0.01_GR, neuronal_promoters_GR) / mean(randomized_overlap_0.01[,7]),
+                        numOverlaps(susie_ld_gwas_0.1_GR, neuronal_promoters_GR) / mean(randomized_overlap_0.1[,7]),
+                        numOverlaps(susie_ld_gwas_0.5_GR, neuronal_promoters_GR) / mean(randomized_overlap_0.5[,7]) )
+
+OP_enrichment = c(numOverlaps(susie_ld_gwas_0.001_GR, oligo_promoters_GR) / mean(randomized_overlap_0.001[,8]), 
+                        numOverlaps(susie_ld_gwas_0.01_GR, oligo_promoters_GR) / mean(randomized_overlap_0.01[,8]),
+                        OP_enrichment_0.1 = numOverlaps(susie_ld_gwas_0.1_GR, oligo_promoters_GR) / mean(randomized_overlap_0.1[,8]),
+                        OP_enrichment_0.5 = numOverlaps(susie_ld_gwas_0.5_GR, oligo_promoters_GR) / mean(randomized_overlap_0.5[,8]) )
+
+enrichment_table = cbind(ME_enrichment, MP_enrichment, AE_enrichment, AP_enrichment, NE_enrichment, NP_enrichment, OE_enrichment, OP_enrichment)
+rownames(enrichment_table) = c('0.001', '0.01', '0.1', '0.5')
+
+enrichment_plot_table = melt(enrichment_table)
+enrichment_plot_table$cell_type <- 'Microglia'
+enrichment_plot_table$cell_type[grepl('A', enrichment_plot_table$X2)] <- 'Astrocyte'
+enrichment_plot_table$cell_type[grepl('O', enrichment_plot_table$X2)] <- 'Oligodendrocyte'
+enrichment_plot_table$cell_type[grepl('N', enrichment_plot_table$X2)] <- 'Neuron'
+
+# Create the line plot
+enrichment_plot <- ggplot(enrichment_plot_table, aes(x = X1, y = value, color = X2, group = X2)) +
+  geom_line() + # Optional: to add points at each data value
+  labs(title = "Enrichment Levels", x = "Enrichment Level", y = "Value") +
+  scale_x_log10() + 
+  theme_bw()
+
+
+```
+
+**Figure 2e**: Finally, let's see how enriched fine-mapped SNPs are in CNS cell types as we increase the posterior probability threshold. As we increase the PIP threshold, we should see that the enrichment for microglia increases, as opposed to the other cell types. 
+
+For this analysis, we calculate the proportion of fine-mapped variants that overlap promoters and enhancers in microglia, astrocytes, oligodendrocytes, and neurons over 100 thresholds from 0.0001 to 0.99. We report the fraction of variants overlapping each annotation over these 100 thresholds.  
+
+```{r percent_noncoding_overlap_overlap, message=F, warning=F,}
+library(readr)
+library(dplyr)
+library(regioneR)
+library(ggplot2)
+library(GenomicRanges)
+
+PIP_thresholds <- exp(seq(log(0.0001), log(0.99), length.out = 100))
+ME_percent_overlap = c()
+MP_percent_overlap = c()
+AE_percent_overlap = c()
+AP_percent_overlap = c()
+NE_percent_overlap = c()
+NP_percent_overlap = c()
+OE_percent_overlap = c()
+OP_percent_overlap = c()
+
+microglia_enhancers_GR = toGRanges(data.frame(chr=microglia_enhancer$V1,
+                                          start=microglia_enhancer$V2, 
+                                          end=microglia_enhancer$V3))
+microglia_promoters_GR = toGRanges(data.frame(chr=microglia_promoter$V1,
+                                          start=microglia_promoter$V2, 
+                                          end=microglia_promoter$V3))
+astrocyte_enhancers_GR = toGRanges(data.frame(chr=astrocyte_enhancer$V1,
+                                          start=astrocyte_enhancer$V2, 
+                                          end=astrocyte_enhancer$V3))
+astrocyte_promoters_GR = toGRanges(data.frame(chr=astrocyte_promoter$V1,
+                                          start=astrocyte_promoter$V2, 
+                                          end=astrocyte_promoter$V3))
+neuronal_enhancers_GR = toGRanges(data.frame(chr=neuronal_enhancer$V1,
+                                          start=neuronal_enhancer$V2, 
+                                          end=neuronal_enhancer$V3))
+neuronal_promoters_GR = toGRanges(data.frame(chr=neuronal_promoter$V1,
+                                          start=neuronal_promoter$V2, 
+                                          end=neuronal_promoter$V3))
+oligo_enhancers_GR = toGRanges(data.frame(chr=oligodendrocyte_enhancer$V1,
+                                          start=oligodendrocyte_enhancer$V2, 
+                                          end=oligodendrocyte_enhancer$V3))
+oligo_promoters_GR = toGRanges(data.frame(chr=oligodendrocyte_promoter$V1,
+                                          start=oligodendrocyte_promoter$V2, 
+                                          end=oligodendrocyte_promoter$V3))
+
+for (threshold in PIP_thresholds) {
+  susie_ld_gwas_filtered <- susie_ld_gwas_rsids %>% filter(PIP >= threshold) %>% 
+    mutate(end=start + 1, chrom=paste0('chr', CHR)) %>% select(chrom, start, end, RSID)
+  
+  susie_ld_gwas_filtered_GR = toGRanges(data.frame(chr=susie_ld_gwas_filtered$chrom, 
+                                          start=susie_ld_gwas_filtered$start, 
+                                          end=susie_ld_gwas_filtered$end))
+  
+  ME_percent_overlap = c(ME_percent_overlap, numOverlaps(susie_ld_gwas_filtered_GR, microglia_enhancers_GR) / length(susie_ld_gwas_filtered_GR))
+  MP_percent_overlap = c(MP_percent_overlap, numOverlaps(susie_ld_gwas_filtered_GR, microglia_promoters_GR) / length(susie_ld_gwas_filtered_GR))
+  AE_percent_overlap = c(AE_percent_overlap, numOverlaps(susie_ld_gwas_filtered_GR, astrocyte_enhancers_GR) / length(susie_ld_gwas_filtered_GR))
+  AP_percent_overlap = c(AP_percent_overlap, numOverlaps(susie_ld_gwas_filtered_GR, astrocyte_promoters_GR) / length(susie_ld_gwas_filtered_GR))
+  NE_percent_overlap = c(NE_percent_overlap, numOverlaps(susie_ld_gwas_filtered_GR, neuronal_enhancers_GR) / length(susie_ld_gwas_filtered_GR))
+  NP_percent_overlap = c(NP_percent_overlap, numOverlaps(susie_ld_gwas_filtered_GR, neuronal_promoters_GR) / length(susie_ld_gwas_filtered_GR))
+  OE_percent_overlap = c(OE_percent_overlap, numOverlaps(susie_ld_gwas_filtered_GR, oligo_enhancers_GR) / length(susie_ld_gwas_filtered_GR))
+  OP_percent_overlap = c(OP_percent_overlap, numOverlaps(susie_ld_gwas_filtered_GR, oligo_promoters_GR) / length(susie_ld_gwas_filtered_GR))
+}
+
+percent_overlap = cbind(ME_percent_overlap, MP_percent_overlap, 
+                         AE_percent_overlap, AP_percent_overlap, 
+                         NE_percent_overlap, NP_percent_overlap, 
+                         OE_percent_overlap, OP_percent_overlap)
+
+percent_overlap_table = melt(percent_overlap)
+duplicate_PIP_thresholds = rep(PIP_thresholds, times = 8)
+percent_overlap_table = cbind(percent_overlap_table, duplicate_PIP_thresholds)
+library(scales)
+# Create the line plot
+percent_overlap_plot <- ggplot(percent_overlap_table, aes(x = duplicate_PIP_thresholds, y = value * 100, color = X2, group = X2)) +
+  geom_line() + # Optional: to add points at each data value
+  labs(title = "Enrichment Levels", x = "\nEnrichment Level", y = "Value\n") +
+  scale_color_manual(values = c("MP_percent_overlap" = "#419d5d", "ME_percent_overlap" = "#74C476", 
+                                "AP_percent_overlap" = "#B30000", "AE_percent_overlap" = "#ff2626",
+                                "NP_percent_overlap" = "#084594", "NE_percent_overlap" = "#6BAED6",
+                                "OP_percent_overlap" = "#FF8A28", "OE_percent_overlap" = "#FDAE6B")) +
+  scale_x_log10(labels = label_number()) + 
+  labs(x = "\nPosterior Probability Threshold", y = "Fine-mapped Variants overlapping \nCNS Promoter/Enhancer Marks (%)\n") + 
+  ylim(NA, 40) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") + 
+  theme_bw() +
+  theme(
+    axis.title = element_text(size = 20, color = "black"),   
+    axis.text = element_text(size = 16, color = "black"),
+  ) 
+
+print(percent_overlap_plot)
+
+
+```
+
+
+
+
+
+
