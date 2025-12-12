@@ -14,8 +14,7 @@ This repository contains all analyses regarding this manuscript, "Regulatory lan
 
 Supplementary Tables: 
 
-### Credible Set Summary (Figure 2a–b)
-[➡️ View the interactive report](https://ashvinravi.github.io/AD_MPRA/credible_set_summary/credible_set_summary.html)
+[Credible Set Summary (Figure 2a–b)](https://ashvinravi.github.io/AD_MPRA/credible_set_summary/credible_set_summary.html)
 
 
 Epigenomic Overlap Analysis (Figure 2c-e): 
