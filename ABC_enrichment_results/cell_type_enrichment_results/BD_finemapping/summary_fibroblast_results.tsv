@@ -1,0 +1,6 @@
+CellType	name	number_of_snps	OR
+astrocyte-ENCODE	0.681	3	4.405286343612334
+fibroblast_of_arm-ENCODE	1.106	4	3.6166365280289328
+fibroblast_of_dermis-Roadmap	0.756	4	5.291005291005291
+fibroblast_of_lung-Roadmap	0.677	3	4.431314623338257
+foreskin_fibroblast-Roadmap	0.763	5	6.553079947575361

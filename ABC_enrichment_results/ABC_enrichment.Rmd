@@ -1,0 +1,237 @@
+---
+title: "ABC Enrichment Plots"
+subtitle: "Overlap Tables"
+author: |
+ | Ashvin Ravi
+ | Raj Lab
+ | Department of Neuroscience
+ | Icahn School of Medicine at Mount Sinai
+ | NYC, New York
+output: 
+ rmarkdown::html_document:
+   theme: cerulean
+   highlight: haddock
+   code_folding: hide
+   toc: true
+   toc_float: true
+   smooth_scroll: true
+   number_sections: false
+   self_contained: true
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Bootstrapping Analysis: ABC Model Enhancers
+
+Here, we assess the enrichment of fine-mapped AD SNPs in cell-type specific enhancers identified by the Activity-by-Contact (ABC) Model. We use data from 132 cell types (Nasser et al. 2021, Kosoy et al. 2022). 
+
+We calculate an enrichment ratio using the following formula: 
+
+**(# fine-mapped SNPs overlapping ABC enhancers in cell type x) / (same # of randomly sampled SNPs from 1000G panel overlapping ABC enhancers in cell type x)**
+
+The 1000G panel of common variants can be found in the 1000G_panel_hg19 folder. 
+
+We run this 1000 times and take the average of the 1000 runs to calculate the final enrichment ratio. 
+
+A sample script for running this analysis can be found within the ABC_enrichment_results folder, called **bootstrapping_analysis_sample_script.R**. For this markdown, we are using results calculated from this script (stored in the cell_type_enrichment_results folder).   
+
+```{r createDT, echo=FALSE, message=FALSE, warning=FALSE}
+library(DT)
+createDT <- function(DF, caption="", scrollY=500){
+  data <- DT::datatable(DF, caption=caption,
+    extensions =  'Buttons',
+    options = list( dom = 'Bfrtip', 
+                    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'), 
+                    scrollY = scrollY, scrollX=T, scrollCollapse = T, paging = F,  
+                      columnDefs = list(list(className = 'dt-center', targets = "_all"))
+    )
+  ) 
+   return(data)
+}
+```
+
+```{r plot_enrichment_results_finemapping, warning=F, include=FALSE, fig.height=7, fig.width=15}
+library(ggplot2)
+library(ggrepel)
+library(readr)
+# Load bed files for cell-type specific data (ABC Model Results/ATAC-seq data)
+library(valr)
+library(readr)
+library(dplyr)
+
+
+setwd('/Users/ashvinravi/Desktop/finemapping_MPRA_project/AD_MPRA/')
+summary_MNP_AD <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_finemapping/summary_MNP_results.tsv')
+summary_b_cell_AD <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_finemapping/summary_b_cell_results.tsv')
+summary_t_cell_AD <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_finemapping/summary_t_cell_results.tsv')
+summary_fibroblasts_AD <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_finemapping/summary_fibroblast_results.tsv')
+summary_hepatocyte_AD <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_finemapping/summary_hepatocyte_results.tsv')
+summary_epithelial_AD <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_finemapping/summary_epithelial_results.tsv')
+summary_other_AD <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_finemapping/summary_other_results.tsv')
+summary_MNP_AD$Category <- "MNP"
+summary_t_cell_AD$Category <- "T-cell"
+summary_b_cell_AD$Category <- "B-cell"
+summary_fibroblasts_AD$Category <- "Fibroblasts"
+summary_hepatocyte_AD$Category <- "Hepatocytes"
+summary_epithelial_AD$Category <- "Epithelial"
+summary_other_AD$Category <- "Other"
+AD_finemapping = rbind(summary_MNP_AD, summary_t_cell_AD, summary_b_cell_AD, summary_fibroblasts_AD, 
+                       summary_hepatocyte_AD, summary_epithelial_AD, summary_other_AD)
+AD_finemapping$variants = "AD finemapped"
+
+summary_MNP_AD_GWAS <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_lead_gwas_snps/summary_MNP_results.tsv')
+summary_b_cell_AD_GWAS <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_lead_gwas_snps/summary_b_cell_results.tsv')
+summary_t_cell_AD_GWAS <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_lead_gwas_snps/summary_t_cell_results.tsv')
+summary_fibroblasts_AD_GWAS <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_lead_gwas_snps/summary_fibroblast_results.tsv')
+summary_hepatocyte_AD_GWAS <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_lead_gwas_snps/summary_hepatocyte_results.tsv')
+summary_epithelial_AD_GWAS <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_lead_gwas_snps/summary_epithelial_results.tsv')
+summary_other_AD_GWAS <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/AD_lead_gwas_snps/summary_other_results.tsv')
+summary_MNP_AD_GWAS$Category <- "MNP"
+summary_t_cell_AD_GWAS$Category <- "T-cell"
+summary_b_cell_AD_GWAS$Category <- "B-cell"
+summary_fibroblasts_AD_GWAS$Category <- "Fibroblasts"
+summary_hepatocyte_AD_GWAS$Category <- "Hepatocytes"
+summary_epithelial_AD_GWAS$Category <- "Epithelial"
+summary_other_AD_GWAS$Category <- "Other"
+AD_lead_gwas = rbind(summary_MNP_AD_GWAS, summary_t_cell_AD_GWAS, summary_b_cell_AD_GWAS,
+                       summary_fibroblasts_AD_GWAS, summary_hepatocyte_AD_GWAS, summary_epithelial_AD_GWAS,
+                       summary_other_AD_GWAS)
+AD_lead_gwas$variants = "AD lead gwas"
+
+
+summary_MNP_BP <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/BD_finemapping/summary_MNP_results.tsv')
+summary_b_cell_BP <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/BD_finemapping/summary_b_cell_results.tsv')
+summary_t_cell_BP <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/BD_finemapping/summary_t_cell_results.tsv')
+summary_fibroblasts_BP <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/BD_finemapping/summary_fibroblast_results.tsv')
+summary_hepatocyte_BP <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/BD_finemapping/summary_hepatocyte_results.tsv')
+summary_epithelial_BP <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/BD_finemapping/summary_epithelial_results.tsv')
+summary_other_BP <- read_tsv('ABC_enrichment_results/cell_type_enrichment_results/BD_finemapping/summary_other_results.tsv')
+summary_MNP_BP$Category <- "MNP"
+summary_t_cell_BP$Category <- "T-cell"
+summary_b_cell_BP$Category <- "B-cell"
+summary_fibroblasts_BP$Category <- "Fibroblasts"
+summary_hepatocyte_BP$Category <- "Hepatocytes"
+summary_epithelial_BP$Category <- "Epithelial"
+summary_other_BP$Category <- "Other"
+BD_finemapped <- rbind(summary_MNP_BP, summary_t_cell_BP, summary_b_cell_BP, 
+                            summary_fibroblasts_BP, summary_hepatocyte_BP, summary_epithelial_BP,
+                            summary_other_BP)
+BD_finemapped$variants = "BD finemapped"
+
+
+
+enrichment_summary <- rbind(AD_finemapping, AD_lead_gwas, BD_finemapped)
+
+enrichment_summary$Category <- factor(enrichment_summary$Category,
+                                      levels = c('MNP','T-cell','B-cell','Fibroblasts','Hepatocytes','Epithelial','Other'),ordered = TRUE)
+
+enrichment_summary$pvalue <- pnorm(enrichment_summary$OR, mean=mean(enrichment_summary$OR), sd=sd(enrichment_summary$OR), lower.tail=FALSE)
+enrichment_summary$FDR <- p.adjust(enrichment_summary$pvalue, method="BH")
+
+enrichment_summary_finemapping <- enrichment_summary[enrichment_summary$variants == 'AD finemapped',]
+
+ # ggsave(file="/Users/ashvinravi/Desktop/finemapping_MPRA_project/ABC_enrichment_results/BD_finemapping.svg", plot=sboxplot, width=12, height=6)
+
+```
+
+## Fine-mapped variants: Enrichment in ABC enhancers
+
+```{r print_boxplot, warning=F}
+
+sboxplot1 <- ggplot(enrichment_summary_finemapping, aes(x=Category, y=OR, color = Category)) + 
+  geom_boxplot(outline=FALSE) + 
+  geom_point() + 
+  geom_jitter(position = position_jitter(width=0.02)) + 
+  theme_classic() +
+  xlab('Cell Type Category') + 
+  ylab('Enrichment Ratio \n (Fine-mapped BD Variants/all variants)') +
+  ylim(c(0,31)) + 
+  theme(axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) + 
+  geom_hline(yintercept=0,linetype=2)
+
+print(sboxplot1)
+
+```
+
+## AD GWAS variants: Enrichment in ABC enhancers
+
+
+```{r, warning=F}
+sboxplot2 <- ggplot(enrichment_summary[enrichment_summary$variants == 'AD lead gwas',], aes(x=Category, y=OR, color = Category)) + 
+  geom_boxplot(outline=FALSE) + 
+  geom_point() + 
+  geom_jitter(position = position_jitter(width=0.02)) + 
+  theme_classic() +
+  xlab('Cell Type Category') + 
+  ylab('Enrichment Ratio \n (Fine-mapped BD Variants/all variants)') +
+  ylim(c(0,31)) + 
+  theme(axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) + 
+  geom_hline(yintercept=0,linetype=2)
+
+print(sboxplot2)
+```
+
+## Bipolar Disorder Fine-mapped Variants: Enrichment in ABC enhancers
+
+
+```{r, warning=F}
+sboxplot3 <- ggplot(enrichment_summary[enrichment_summary$variants == 'BD finemapped',], aes(x=Category, y=OR, color = Category)) + 
+  geom_boxplot(outline=FALSE) + 
+  geom_point() + 
+  geom_jitter(position = position_jitter(width=0.02)) + 
+  theme_classic() +
+  xlab('Cell Type Category') + 
+  ylab('Enrichment Ratio \n (Fine-mapped BD Variants/all variants)') +
+  ylim(c(0,31)) + 
+  theme(axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0))) + 
+  geom_hline(yintercept=0,linetype=2)
+
+print(sboxplot3)
+```
+
+### Enrichment Results for All ABC Enhancers Table
+This table shows enrichment statistics for all ABC enhancers for AD fine-mapped variants, AD GWAS variants, and BD fine-mapped variants. 
+```{r}
+createDT(enrichment_summary)
+```
+
+
+### Fine-mapped variant overlap with microglia ABC enhancers
+This table shows all fine-mapped variants that overlap in microglia ABC enhancers.
+```{r microglia_ABC_table, warning=F}
+
+setwd('/Users/ashvinravi/Desktop/finemapping_MPRA_project/AD_MPRA/')
+abc_enhancer_coords <- read_tsv('ABC_enrichment_results/ABC_enhancers/abc_enhancer_coords_hg19.tsv', show_col_types=F)
+
+microglia_enhancer_coords <- abc_enhancer_coords[abc_enhancer_coords$CellType == 'microglia',]
+microglia_abc_coords <- microglia_enhancer_coords
+
+# Load fine-mapped results here 
+
+fine_mapping_results <- read.table('/Users/ashvinravi/Desktop/finemapping_MPRA_project/AD_MPRA/full_results/susie_ld_gwas_with_rsids_hg19.tsv.gz', sep = '\t', header = TRUE)
+names(microglia_abc_coords)[names(microglia_abc_coords) == 'chr'] = 'chrom'
+names(fine_mapping_results)[names(fine_mapping_results) == 'CHR'] = 'chrom'
+names(fine_mapping_results)[names(fine_mapping_results) == 'BP'] = 'start'
+fine_mapping_results$end <- fine_mapping_results$start + 1
+
+fine_mapping_results <- fine_mapping_results %>% filter(PIP >= 0.1)
+
+fine_mapping_results$chrom <- paste('chr', fine_mapping_results$chrom, sep = '')
+microglia_intersect <- bed_intersect(microglia_abc_coords, fine_mapping_results)
+microglia_intersect_results <- microglia_intersect %>% distinct(chrom, start.y, end.y, LOCUS.y, PIP.y, CREDIBLE_SET.y)
+
+createDT(microglia_intersect_results)
+```
+
+
+
+
+
+
+
