@@ -1,0 +1,419 @@
+---
+title: "AD GWAS Fine-mapping"
+subtitle: "Credible Set Summary"
+author: |
+ | Ashvin Ravi
+ | Raj Lab
+ | Department of Neuroscience
+ | Icahn School of Medicine at Mount Sinai
+ | NYC, New York
+output: 
+ rmarkdown::html_document:
+   theme: cerulean
+   highlight: haddock
+   code_folding: hide
+   toc: true
+   toc_float: true
+   smooth_scroll: true
+   number_sections: false
+   self_contained: true
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r createDT, echo=FALSE, message=FALSE, warning=FALSE}
+createDT <- function(DF, caption="", scrollY=500){
+  data <- DT::datatable(DF, caption=caption,
+    extensions =  'Buttons',
+    options = list( dom = 'Bfrtip', 
+                    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'), 
+                    scrollY = scrollY, scrollX=T, scrollCollapse = T, paging = F,  
+                      columnDefs = list(list(className = 'dt-center', targets = "_all"))
+    )
+  ) 
+   return(data)
+}
+```
+
+# Fine-mapping Summary
+
+This R Markdown focuses on prioritizing variants based on whether they fall in a credible set/the posterior inclusion probability is significant. Here, we map 81 loci from the latest AD GWAS from the European Alzheimer's Disease BioBank (Bellenguez et al. 2022). \
+
+## Fine-mapping Methods/Review
+
+Statistical fine-mapping was performed on each locus separately with FINEMAP and SuSiE, Bayesian fine-mapping methods that report: \
+**1) Credible Set (CS)**: set of SNPs set of SNPs containing the true functional variant with 95% coverage probability.\
+**2) Posterior Inclusion Probability (PIP)**: probability from 0 to 1 indicating a given variant's likelihood of causality.\
+
+Functional fine-mapping was performed using PolyFun, which compute SNP-wise heritability-derived prior probabilities using an L2-regularized extension of stratified-linkage disequilibrium (LD) Score (S-LDSC) regression. For PolyFun + SuSiE, we used the default UK Biobank baseline model composed of 187 binarized epigenomic and genic annotations. Finally, we also use SuSiE and FINEMAP, In all subsequent analyses presented here, SNPs that fall within the HLA region were excluded due to the particularly complex LD structure.\
+
+For all analyses presented, we set the number of causal SNPs to five.\
+
+All fine-mapped results split by method are located in the full_results folder within the GitHub repository. 
+
+
+```{r load_fine_mapped_snps, echo=F, message=F, warning=F}
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(ggpubr)
+
+setwd('/Users/ashvinravi/Desktop/finemapping_MPRA_project/AD_MPRA/')
+finemap_results = read_tsv('full_results/finemap_results_full.tsv.gz')
+polyfun_susie_results = read_tsv('full_results/polyfun_susie_results_full.tsv.gz')
+polyfun_finemap_results = read_tsv('full_results/polyfun_finemap_results_full.tsv.gz')
+susie_results = read_tsv('full_results/susie_results_full.tsv.gz')
+susie_ld_gwas = read_tsv('full_results/susie_ld_gwas_with_rsids_hg19.tsv.gz')
+finemap_ld_gwas <- read_tsv('full_results/finemap_ld_gwas_with_rsids_hg19.tsv.gz')
+
+```
+
+
+## Size of the smallest Credible Set for each Locus
+
+**Figure 2a**: Here, we show the size of the smallest credible set for each locus across all 6 fine-mapping methods. Methods are listed here: \
+1) SuSiE (UKBB LD) \
+2) FINEMAP (UKBB LD) \
+3) PolyFun + SuSiE (UKBB LD) \
+4) PolyFun + FINEMAP (UKBB LD) \
+5) SuSiE (GWAS LD) \
+6) FINEMAP (GWAS LD) \
+
+```{r finemapping_results, echo=F, message=F, warning=F}
+credible_set_graph <- function(dataset, method, threshold) {
+  credible_set_finemap_results <- dataset %>% group_by(LOCUS, CREDIBLE_SET) %>% dplyr::filter(PIP >= threshold) %>% summarise(sum(CREDIBLE_SET))
+  credible_set_finemap_results$xaxis <- method
+  # print(head(credible_set_finemap_results))
+  if (length(dataset$LOCUS[!dataset$LOCUS %in% credible_set_finemap_results$LOCUS]) > 0) {
+    credible_set_zero_under_threshold <- data.frame(dataset$LOCUS[!dataset$LOCUS %in% credible_set_finemap_results$LOCUS])
+    dim(credible_set_zero_under_threshold)
+    credible_set_zero_under_threshold$credible_set_sum = 0
+    # print(head(credible_set_zero_under_threshold))
+    colnames(credible_set_zero_under_threshold) = c('LOCUS', 'credible_set_sum')
+    credible_set_zero_under_threshold <- unique(credible_set_zero_under_threshold)
+    credible_set_finemap_results_final <- credible_set_finemap_results %>% dplyr::filter(CREDIBLE_SET != 0) %>% summarize(min(`sum(CREDIBLE_SET)`)) 
+    zero_cs <- credible_set_finemap_results[!credible_set_finemap_results$LOCUS %in% credible_set_finemap_results_final$LOCUS,]
+    zero_cs <- zero_cs[, c(1,3)]
+    colnames(credible_set_finemap_results_final) = c('LOCUS', 'credible_set_sum')
+    colnames(zero_cs) = c('LOCUS', 'credible_set_sum')
+    credible_set_finemap_results_final <- rbind(zero_cs, credible_set_zero_under_threshold, credible_set_finemap_results_final)
+  } else {
+    credible_set_finemap_results_final <- credible_set_finemap_results %>% dplyr::filter(CREDIBLE_SET != 0) %>% summarize(min(`sum(CREDIBLE_SET)`)) 
+    zero_cs <- credible_set_finemap_results[!credible_set_finemap_results$LOCUS %in% credible_set_finemap_results_final$LOCUS,]
+    zero_cs <- zero_cs[, c(1,3)]
+    colnames(credible_set_finemap_results_final) = c('LOCUS', 'credible_set_sum')
+    colnames(zero_cs) = c('LOCUS', 'credible_set_sum')
+    credible_set_finemap_results_final <- rbind(zero_cs, credible_set_finemap_results_final)
+  }
+  # =credible_set_finemap_results <- rbind(credible_set_finemap_results_final, zero_cs)
+
+  credible_set_finemap_results_final$category = '15+'
+  credible_set_finemap_results_final$decoy2 <- 9
+  
+  # print(credible_set_finemap_results$LOCUS[credible_set_finemap_results$credible_set_sum >= 15])
+  
+  
+  credible_set_finemap_results_final$category[credible_set_finemap_results_final$credible_set_sum < 15 & credible_set_finemap_results_final$credible_set_sum >= 11] = '11-14'
+  credible_set_finemap_results_final$decoy2[credible_set_finemap_results_final$credible_set_sum < 15 & credible_set_finemap_results_final$credible_set_sum >= 11] = 8
+
+  credible_set_finemap_results_final$category[credible_set_finemap_results_final$credible_set_sum <= 10 & credible_set_finemap_results_final$credible_set_sum >= 8] = '8-10'
+  credible_set_finemap_results_final$decoy2[credible_set_finemap_results_final$credible_set_sum <= 10 & credible_set_finemap_results_final$credible_set_sum >= 8] = 6
+
+  credible_set_finemap_results_final$category[credible_set_finemap_results_final$credible_set_sum <= 7 & credible_set_finemap_results_final$credible_set_sum >= 5] = '5-7'
+  credible_set_finemap_results_final$decoy2[credible_set_finemap_results_final$credible_set_sum <= 7 & credible_set_finemap_results_final$credible_set_sum >= 5] = 5
+
+  credible_set_finemap_results_final$category[credible_set_finemap_results_final$credible_set_sum <= 4 & credible_set_finemap_results_final$credible_set_sum >= 2] = '2-4'
+  credible_set_finemap_results_final$decoy2[credible_set_finemap_results_final$credible_set_sum <= 4 & credible_set_finemap_results_final$credible_set_sum >= 2] = 3
+
+  credible_set_finemap_results_final$category[credible_set_finemap_results_final$credible_set_sum == 1] = '1'
+  credible_set_finemap_results_final$decoy2[credible_set_finemap_results_final$credible_set_sum == 1] = 2
+
+  credible_set_finemap_results_final$category[credible_set_finemap_results_final$credible_set_sum == 0] = '0'
+  credible_set_finemap_results_final$decoy2[credible_set_finemap_results_final$credible_set_sum == 0] = 0
+  # print(head(credible_set_finemap_results_final[credible_set_finemap_results_final$category == '15+',]))
+  credible_set_finemap_results_final$xaxis <- 1
+  credible_set_finemap_results_final$decoy <- seq(1, nrow(credible_set_finemap_results_final), by=1)
+  
+
+  
+  temp <- data.frame(table(credible_set_finemap_results_final$category))
+  # print(head(temp))
+  
+  temp$Var1 <- factor(temp$Var1, 
+                      levels = c('15+', 
+                                 '11-14',
+                                 '8-10',
+                                 '5-7',
+                                 '2-4',
+                                 '1',
+                                 '0'))
+  
+  sp <- ggplot(data=temp, 
+               aes(x=method, 
+                   y=Freq, 
+                   fill=Var1,
+                   label=Freq
+                   )
+               ) + 
+    geom_bar(position='stack', 
+             stat='identity') + 
+    geom_text(aes(method, label = Freq), data = temp, position=position_stack(vjust=0.5)) +
+    coord_flip() + 
+    ggtitle(method) +
+    theme_void() + 
+    theme(plot.title = element_text(hjust = 0.05), legend.margin=margin(0,0,0,0),
+        legend.box.margin=margin(5,5,5,5)) +
+    scale_fill_manual(values=c("#D53E4F", 
+                               "#FC8D59", 
+                               "#FEE08B", 
+                               "#FFFFBF",
+                               "#E6F598", 
+                               "#99D594", 
+                               "#3288BD"),
+                      drop=FALSE, 
+                      name='CS size', 
+                      labels=c("15+", 
+                               "11-14", 
+                               "8-10", 
+                               "5-7", 
+                               "2-4", 
+                               "1", 
+                               "0")) 
+  return(sp)
+}
+
+finemap_credible_sets <- credible_set_graph(finemap_results, 'FINEMAP', 0)
+polyfun_finemap_credible_sets <- credible_set_graph(polyfun_finemap_results, 'PolyFun + FINEMAP', 0)
+susie_credible_sets <- credible_set_graph(susie_results, 'SuSiE', 0)
+polyfun_susie_credible_sets <- credible_set_graph(polyfun_susie_results, 'PolyFun + SuSiE', 0)
+susie_ld_gwas_credible_sets <- credible_set_graph(susie_ld_gwas, 'SuSiE + GWAS LD', 0)
+finemap_ld_gwas_credible_sets <- credible_set_graph(finemap_ld_gwas, 'FINEMAP + GWAS LD', 0)
+
+CS_graph_zero <- ggpubr::ggarrange(finemap_credible_sets, polyfun_finemap_credible_sets, susie_credible_sets, polyfun_susie_credible_sets, susie_ld_gwas_credible_sets, finemap_ld_gwas_credible_sets, ncol=1, nrow=6, common.legend = TRUE, legend="right")
+
+finemap_credible_sets_0.05 <- credible_set_graph(finemap_results, 'FINEMAP', 0.05)
+polyfun_finemap_credible_sets_0.05 <- credible_set_graph(polyfun_finemap_results, 'PolyFun + FINEMAP', 0.05)
+susie_credible_sets_0.05 <- credible_set_graph(susie_results, 'SuSiE', 0.05)
+polyfun_susie_credible_sets_0.05 <- credible_set_graph(polyfun_susie_results, 'PolyFun + SuSiE', 0.05)
+susie_ld_gwas_credible_sets_0.05 <- credible_set_graph(susie_ld_gwas, 'SuSiE + GWAS LD', 0.05)
+finemap_ld_gwas_credible_sets_0.05 <- credible_set_graph(finemap_ld_gwas, 'FINEMAP + GWAS LD', 0.05)
+
+CS_graph_0.05 <- ggpubr::ggarrange(finemap_credible_sets_0.05, polyfun_finemap_credible_sets_0.05, susie_credible_sets_0.05, polyfun_susie_credible_sets_0.05, susie_ld_gwas_credible_sets_0.05, finemap_ld_gwas_credible_sets_0.05, ncol=1, nrow=6, common.legend = TRUE, legend="top")
+CS_graph_0.05 <- annotate_figure(CS_graph_0.05, top = text_grob("Modified Credible Set Size - PP > 0.05", color = "#5A5A5A", face = "bold", size = 14))
+
+finemap_credible_sets_0.1 <- credible_set_graph(finemap_results, 'FINEMAP', 0.1)
+polyfun_finemap_credible_sets_0.1 <- credible_set_graph(polyfun_finemap_results, 'PolyFun + FINEMAP', 0.1)
+susie_credible_sets_0.1 <- credible_set_graph(susie_results, 'SuSiE', 0.1)
+polyfun_susie_credible_sets_0.1 <- credible_set_graph(polyfun_susie_results, 'PolyFun + SuSiE', 0.1)
+susie_ld_gwas_credible_sets_0.1 <- credible_set_graph(susie_ld_gwas, 'SuSiE + GWAS LD', 0.1)
+finemap_ld_gwas_credible_sets_0.1 <- credible_set_graph(finemap_ld_gwas, 'FINEMAP + GWAS LD', 0.1)
+
+CS_graph_0.1 <- ggpubr::ggarrange(finemap_credible_sets_0.1, polyfun_finemap_credible_sets_0.1, susie_credible_sets_0.1, polyfun_susie_credible_sets_0.1, susie_ld_gwas_credible_sets_0.1, finemap_ld_gwas_credible_sets_0.1, ncol=1, nrow=6, common.legend = TRUE, legend="right")
+# CS_graph_0.1 <- annotate_figure(CS_graph_0.1, top = text_grob("Modified Credible Set Size - PP > 0.1", color = "#5A5A5A", face = "bold", size = 14))
+
+
+finemap_credible_sets_0.5 <- credible_set_graph(finemap_results, 'FINEMAP', 0.5)
+polyfun_finemap_credible_sets_0.5 <- credible_set_graph(polyfun_finemap_results, 'PolyFun + FINEMAP', 0.5)
+susie_credible_sets_0.5 <- credible_set_graph(susie_results, 'SuSiE', 0.5)
+polyfun_susie_credible_sets_0.5 <- credible_set_graph(polyfun_susie_results, 'PolyFun + SuSiE', 0.5)
+susie_ld_gwas_credible_sets_0.5 <- credible_set_graph(susie_ld_gwas, 'SuSiE + GWAS LD', 0.5)
+finemap_ld_gwas_credible_sets_0.5 <- credible_set_graph(finemap_ld_gwas, 'FINEMAP + GWAS LD', 0.5)
+
+CS_graph_0.5 <- ggpubr::ggarrange(finemap_credible_sets_0.5, polyfun_finemap_credible_sets_0.5, susie_credible_sets_0.5, polyfun_susie_credible_sets_0.5, susie_ld_gwas_credible_sets_0.5, finemap_ld_gwas_credible_sets_0.5, ncol=1, nrow=6, common.legend = TRUE, legend="top")
+CS_graph_0.5 <- annotate_figure(CS_graph_0.5, top = text_grob("Modified Credible Set Size - PP > 0.5", color = "#5A5A5A", face = "bold", size = 14))
+
+
+finemap_credible_sets_0.9 <- credible_set_graph(finemap_results, 'FINEMAP', 0.9)
+polyfun_finemap_credible_sets_0.9 <- credible_set_graph(polyfun_finemap_results, 'PolyFun + FINEMAP', 0.9)
+susie_credible_sets_0.9 <- credible_set_graph(susie_results, 'SuSiE', 0.9)
+polyfun_susie_credible_sets_0.9 <- credible_set_graph(polyfun_susie_results, 'PolyFun + SuSiE', 0.9)
+susie_ld_gwas_credible_sets_0.9 <- credible_set_graph(susie_ld_gwas, 'SuSiE + GWAS LD', 0.9)
+finemap_ld_gwas_credible_sets_0.9 <- credible_set_graph(finemap_ld_gwas, 'FINEMAP + GWAS LD', 0.9)
+
+CS_graph_0.9 <- ggpubr::ggarrange(finemap_credible_sets_0.9, polyfun_finemap_credible_sets_0.9, susie_credible_sets_0.9, polyfun_susie_credible_sets_0.9, susie_ld_gwas_credible_sets_0.9, finemap_ld_gwas_credible_sets_0.9, ncol=1, nrow=6, common.legend = TRUE, legend="top")
+
+CS_graph_0.9 <- annotate_figure(CS_graph_0.9, top = text_grob("Modified Credible Set Size - PP > 0.9", color = "#5A5A5A", face = "bold", size = 14))
+```
+
+### Size of Smallest Credible Set for each locus (ALL SNPs included)
+
+Here, we observe that all SNPs fall into a credible set when we fine-map with the FINEMAP method, regardless of whether we add functional annotations or use GWAS LD. We also observe that many of these loci are noisy, and contain very large credible sets - does this mean all of the SNPs within the set contain very high PIPs? We can see how the size changes by calculating a modified credible set size and filter based on posterior probability.  
+
+```{r, echo = F, warning = F, message = F}
+print(CS_graph_zero)
+```
+
+
+### Modified Smallest Credible Set Size for each locus (PP >= 0.1)
+
+```{r, echo = F, warning = F, message = F}
+print(CS_graph_0.1)
+```
+
+### Modified Smallest Credible Set Size for each locus (PP >= 0.5)
+
+```{r, echo = F, warning = F, message = F}
+print(CS_graph_0.5)
+```
+
+### Modified Smallest Credible Set Size for each locus (PP >= 0.9)
+
+```{r, echo = F, warning = F, message = F}
+print(CS_graph_0.9)
+```
+
+As we increase the posterior probability, we see that the credible set sizes become much smaller and many loci now do not have SNPs above a certain posterior probability that fall in a credible set.
+
+## Upset Plot 
+
+**Figure 2b**: Here, we check how many SNPs with PIP > 0.1 overlap across all fine-mapping methods. 
+
+```{r UCS, echo=FALSE, warning = F, message = F, fig.width=10, fig.height=7, crop = NULL, fig_crop=FALSE}
+library(dplyr)
+library(valr)
+library(GenomicRanges)
+library(regioneR)
+library(data.table)
+library(rtracklayer)
+library(forcats)
+library(ggupset)
+library(tidyr)
+
+filter_threshold <- function(dataset, threshold) {
+  return(dataset %>% dplyr::filter(PIP >= threshold))
+}
+
+credible_set_threshold <- function(dataset) {
+  return(dataset %>% dplyr::filter(CREDIBLE_SET > 0))
+}
+
+table <- inner_join(susie_ld_gwas, finemap_ld_gwas, by = c('RSID', 'LOCUS'))
+table <- table %>% dplyr::distinct()
+
+a <- ggplot(table, aes(x = PIP.x, y = PIP.y)) + geom_point() + theme_bw()
+
+finemap_0.1 <- filter_threshold(finemap_results, 0.01)
+polyfun_finemap_0.1 <- filter_threshold(polyfun_finemap_results, 0.01)
+susie_0.1 <- filter_threshold(susie_results, 0.01)
+polyfun_susie_0.1 <- filter_threshold(polyfun_susie_results, 0.01)
+susie_ld_gwas_0.1 <- filter_threshold(susie_ld_gwas, 0.01)
+finemap_ld_gwas_0.1 <- filter_threshold(finemap_ld_gwas, 0.01)
+
+finemap_0.1_CS <- credible_set_threshold(finemap_0.1)
+polyfun_finemap_0.1_CS <- credible_set_threshold(polyfun_finemap_0.1)
+susie_0.1_CS <- credible_set_threshold(susie_0.1)
+polyfun_susie_0.1_CS <- credible_set_threshold(polyfun_susie_0.1)
+susie_ld_gwas_0.1_CS <- credible_set_threshold(susie_ld_gwas_0.1)
+names(susie_ld_gwas_0.1_CS)[names(susie_ld_gwas_0.1_CS) == 'RSID'] = 'SNP'
+names(susie_ld_gwas_0.1_CS)[names(susie_ld_gwas_0.1_CS) == 'start'] = 'BP'
+finemap_ld_gwas_0.1_CS <- credible_set_threshold(finemap_ld_gwas_0.1)
+names(finemap_ld_gwas_0.1_CS)[names(finemap_ld_gwas_0.1_CS) == 'RSID'] = 'SNP'
+names(finemap_ld_gwas_0.1_CS)[names(finemap_ld_gwas_0.1_CS) == 'start'] = 'BP'
+
+UCS_set <- finemap_0.1_CS %>% 
+  full_join(polyfun_finemap_0.1_CS, by = c('CHR', 'SNP', 'BP', 'LOCUS')) %>%
+  full_join(susie_0.1_CS, by = c('CHR', 'SNP', 'BP', 'LOCUS')) %>%
+  full_join(polyfun_susie_0.1_CS, by = c('CHR', 'SNP', 'BP', 'LOCUS')) %>%
+  full_join(susie_ld_gwas_0.1_CS, by = c('CHR', 'SNP', 'BP', 'LOCUS')) %>% 
+  full_join(finemap_ld_gwas_0.1_CS, by = c('CHR', 'SNP', 'BP', 'LOCUS'))
+
+names(UCS_set)[names(UCS_set) == "PIP.x"] = 'FINEMAP_PP'
+names(UCS_set)[names(UCS_set) == "CREDIBLE_SET.x"] = 'FINEMAP_CS'
+names(UCS_set)[names(UCS_set) == "PIP.y"] = 'PolyFun_FINEMAP_PP'
+names(UCS_set)[names(UCS_set) == "CREDIBLE_SET.y"] = 'PolyFun_FINEMAP_CS'
+names(UCS_set)[names(UCS_set) == "PIP.y"] = 'SuSiE_PIP'
+names(UCS_set)[names(UCS_set) == "CREDIBLE_SET.y"] = 'SuSiE_CS'
+names(UCS_set)[names(UCS_set) == "PIP.x.x"] = 'PolyFun_SuSiE_PIP'
+names(UCS_set)[names(UCS_set) == "CREDIBLE_SET.x.x"] = 'PolyFun_SuSiE_CS'
+names(UCS_set)[names(UCS_set) == "PIP.y.y"] = 'SuSiE_GWAS_LD_PIP'
+names(UCS_set)[names(UCS_set) == "CREDIBLE_SET.y.y"] = 'SuSiE_GWAS_LD_CS'
+names(UCS_set)[names(UCS_set) == "PIP.x.x.x"] = 'FINEMAP_GWAS_LD_PIP'
+names(UCS_set)[names(UCS_set) == "CREDIBLE_SET.x.x.x"] = 'FINEMAP_GWAS_LD_CS'
+
+UCS_rsids <- data.frame(UCS_set$SNP)
+UCS_rsids$finemap <- UCS_rsids$UCS_set.SNP %in% finemap_0.1_CS$SNP
+UCS_rsids$polyfun_finemap <- UCS_rsids$UCS_set.SNP %in% polyfun_finemap_0.1_CS$SNP
+UCS_rsids$susie <- UCS_rsids$UCS_set.SNP %in% susie_0.1_CS$SNP
+UCS_rsids$polyfun_susie <- UCS_rsids$UCS_set.SNP %in% polyfun_susie_0.1_CS$SNP
+UCS_rsids$susie_ld_gwas <- UCS_rsids$UCS_set.SNP %in% susie_ld_gwas_0.1_CS$SNP
+UCS_rsids$finemap_ld_gwas <- UCS_rsids$UCS_set.SNP %in% finemap_ld_gwas_0.1_CS$SNP
+UCS_rsids <- unique(UCS_rsids)
+
+name <- UCS_rsids$UCS_set.SNP
+UCS_rsids_transposed <- as.data.frame(t(UCS_rsids[,-1]))
+colnames(UCS_rsids_transposed) <- name
+
+tidy_pathway_member <- UCS_rsids_transposed %>%
+  as_tibble(rownames = "Method") %>% 
+  tidyr::gather(RSID, Member, -Method) %>% 
+  dplyr::filter(Member) %>% 
+  dplyr::select(-Member)
+ 
+t <- tidy_pathway_member %>%
+     group_by(RSID) %>%
+     summarize(Methods = list(Method)) %>% 
+  ggplot(aes(x = Methods)) + 
+  geom_bar() + 
+  scale_x_upset() + 
+  ggtitle("Overlap of SNPs in a Credible Set with PIP > 0.1") + theme_bw() +
+  theme(plot.margin = unit(c(1,2,1,2), "cm")) 
+
+side_plot <- tidy_pathway_member %>%
+     group_by(RSID) %>%
+     summarize(Methods = list(Method)) %>%
+  select(Methods) %>%
+  unnest(cols = Methods) %>%
+  count(Methods) %>%
+  mutate(Methods = fct_reorder(as.factor(Methods), n)) %>% 
+  ggplot(aes(y = n, x = Methods)) +
+    geom_col() +
+    # coord_flip() +
+    # scale_y_reverse() +
+    ggtitle("Number of SNPs in a Credible Set with PIP > 0.1") + 
+    xlab("Methods") + ylab("# of SNPs") + theme_bw() + 
+    scale_y_continuous(expand=c(0,1))
+
+print(t)
+
+# ggsave(file="/Users/ashvinravi/Desktop/finemapping_MPRA_project/Upset_plot.svg", plot=t, width=20, height=6)
+
+
+```
+
+We also show how many SNPs with PIP > 0.1 found in a credible set are found across all methods. 
+
+```{r}
+print(side_plot + coord_flip())
+# ggsave(file="/Users/ashvinravi/Desktop/finemapping_MPRA_project/Upset_side_plot.svg", plot=side_plot + coord_flip(), width=8, height=6)
+```
+
+## Consensus SNPs 
+
+We define consensus SNPs as SNPs with a PIP > 0.1 and found in a credible set across at least 2 methods. We identify 1,654 consensus SNPs across all 6 fine-mapping methods (Supplementary Table 1). 
+
+```{r consensus_snp}
+names(UCS_rsids)[names(UCS_rsids) == "UCS_set.SNP"] <- "SNP"
+df_sub <- inner_join(UCS_rsids, UCS_set, by='SNP')
+
+# df_sub <- dplyr::select(UCS_set, -contains(".x.x"))
+df_sub <- dplyr::select(df_sub, -contains(".y"))
+
+df_sub$number_of_methods <- rowSums(df_sub[2:7])
+df_sub$consensus_snp <- df_sub$number_of_methods >= 2
+
+createDT(df_sub)
+```
+
+
+
+
+
+
+
+
+
+
+
