@@ -22,6 +22,6 @@ Figure 2c-e: [Epigenomic Overlap Analysis](https://ashvinravi.github.io/AD_MPRA/
 
 ABC Enrichment Analysis: 
 
-All Variants Tested for Microglia MPRA: 
+[All Variants Tested for Microglia MPRA](https://ashvinravi.github.io/AD_MPRA/MPRA_library.html) 
 
 
