@@ -7,3 +7,18 @@ Pre-print: https://www.medrxiv.org/content/10.1101/2025.10.13.25337902v1.full.pd
 
 <img width="2125" height="2746" alt="fig1_mpra (1)" src="https://github.com/user-attachments/assets/8b018537-3a2d-4f31-b850-5530be1e5f5c" />
 
+This repository contains all analyses regarding this manuscript, "Regulatory landscape of Alzheimer’s Disease Variants in Human Microglia." 
+
+**Full fine-mapping results and variants split by method are included within the full_results folder within this repository.** 
+
+Supplementary Tables: 
+
+Credible Set Summary (Figure 2a-b): 
+
+Epigenomic Overlap Analysis (Figure 2c-e): 
+
+ABC Enrichment Analysis: 
+
+All Variants Tested for Microglia MPRA: 
+
+
