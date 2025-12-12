@@ -9,7 +9,8 @@ Pre-print: https://www.medrxiv.org/content/10.1101/2025.10.13.25337902v1.full.pd
 
 This repository contains all analyses regarding this manuscript, "Regulatory landscape of Alzheimer’s Disease Variants in Human Microglia." 
 
-**Full fine-mapping results and variants split by method are included within the full_results folder within this repository.** 
+### Fine-mapping Tables 
+**Full AD fine-mapping results and variants split by method are included within the full_results folder within this repository.** 
 
 Supplementary Tables: 
 
